@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#F2F2F7" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>Money · 记账</title>
+    <style>
+      /* Money · Apple 设计语言（单文件版 v2.7）
+         设计原则：①仅浅色，无暗黑 ②只记支出，数字纯黑无¥无红绿
+         ③玻璃只给按钮类控件（iOS 26 Liquid Glass），卡片实色扁平
+         ④间距 8px 节奏，字阶 34/17/15/13 */
+
+      :root {
+        color-scheme: light;
+
+        --page: #f2f2f7;
+        --card: #fff;
+        --inset: rgb(118 118 128 / .1);
+        --label: #1c1c1e;
+        --label-secondary: rgb(60 60 67 / .6);
+        --label-tertiary: rgb(60 60 67 / .3);
+        --separator: rgb(60 60 67 / .16);
+        --fill: rgb(118 118 128 / .12);
+        --accent: #007aff;
+        --red: #c0392b;
+        --red-soft: rgb(224 122 108 / .14);
+
+        /* 液态玻璃配方：高透 + 折射高光描边 + 悬浮投影 */
+        --glass-bg: rgb(255 255 255 / .55);
+        --glass-blur: blur(24px) saturate(180%);
+        --glass-rim: inset 0 1px 0 rgb(255 255 255 / .9), inset 0 0 0 1px rgb(60 60 67 / .1);
+        --glass-shadow: 0 4px 16px rgb(31 41 71 / .08), 0 1px 2px rgb(31 41 71 / .05);
+        --glass-accent-bg: color-mix(in oklab, var(--accent) 80%, transparent);
+        --glass-accent-shadow: inset 0 1px 0 rgb(255 255 255 / .5), 0 4px 14px rgb(0 122 255 / .25);
+        --shadow-card: 0 1px 2px rgb(31 41 71 / .05);
+
+        /* 数据序列：柱用 Apple 蓝渐变，曲线深一档蓝 */
+        --bar-top: #6cb6ff;
+        --bar-bottom: #2f7fe8;
+        --line-stroke: #0a63c9;
+        --bar-track: rgb(118 118 128 / .14);
+
+        --radius-card: 10px;
+        --radius-row: 8px;
+        --radius-sheet: 12px;
+
+        --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", Arial, sans-serif;
+        --spring: cubic-bezier(.32, .72, 0, 1);
+      }
+
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      html, body { min-width: 320px; min-height: 100dvh; margin: 0; }
+      html { background: var(--page); text-size-adjust: 100%; touch-action: manipulation; }
+      body {
+        background: var(--page);
+        color: var(--label);
+        font-family: var(--font);
+        font-variant-numeric: tabular-nums lining-nums;
+        -webkit-font-smoothing: antialiased;
+      }
+      button, input { font: inherit; color: inherit; }
+      button { -webkit-tap-highlight-color: transparent; }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      svg { display: block; }
+      .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+      /* 玻璃按钮基类（仅按钮类控件使用） */
+      .glass {
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-rim), var(--glass-shadow);
+      }
+
+      /* ── 导航栏：滚动收拢为居中小标题 + 毛玻璃 ── */
+      .nav { position: fixed; z-index: 30; top: 0; left: 0; right: 0; margin-inline: auto; width: min(100%, 430px); padding-top: env(safe-area-inset-top); pointer-events: none; }
+      .nav__bg { position: absolute; inset: 0; background: rgb(237 240 247 / .72); border-bottom: 1px solid transparent; opacity: 0; backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); transition: opacity .25s ease, border-color .25s ease; }
+      .nav__bar { position: relative; display: grid; place-items: end center; height: 44px; padding-bottom: 2px; }
+      .nav__title { font-size: 17px; font-weight: 600; letter-spacing: -.02em; opacity: 0; transform: translateY(6px); transition: opacity .25s ease, transform .25s ease; }
+      .nav.is-condensed .nav__bg { opacity: 1; border-bottom-color: var(--separator); }
+      .nav.is-condensed .nav__title { opacity: 1; transform: none; }
+
+      .app-shell { width: min(100%, 430px); min-height: 100dvh; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 44px) 16px calc(96px + env(safe-area-inset-bottom)); }
+      .large-title { margin: 0 0 16px; font-size: 34px; font-weight: 700; letter-spacing: -.021em; line-height: 1.15; }
+
+      /* ── 周期大容器：翻页器 + 分段控件合一（消除突兀） ── */
+      .period-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 12px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim), var(--glass-shadow); }
+      /* 翻页器：与分段控件同款胶囊质感（箭头紧贴日期） */
+      .pager { display: flex; flex: 1; align-items: center; justify-content: center; gap: 0; min-width: 0; padding: 2px; border-radius: 10px; background: var(--glass-bg); box-shadow: var(--glass-rim); }
+      .pager-btn { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border: 0; background: transparent; color: var(--label-secondary); cursor: pointer; transition: opacity .16s ease; }
+      .pager-btn:active { opacity: .45; }
+      .pager-btn:disabled { opacity: .28; cursor: default; }
+      .pager-btn .icon { width: 16px; height: 16px; stroke-width: 2.2; }
+      .pager-label { min-width: 44px; text-align: center; font-size: 17px; font-weight: 600; letter-spacing: -.02em; white-space: nowrap; }
+      .period-row .segmented { flex: 1.15; }
+
+      /* ── 分段控件：玻璃轨道 + 玻璃滑块 ── */
+      .segmented { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 2px; border-radius: 10px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim), var(--glass-shadow); }
+      .segmented__thumb { position: absolute; z-index: 0; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / var(--seg-count, 3)); border-radius: 8px; background: rgb(255 255 255 / .9); box-shadow: 0 1px 3px rgb(0 0 0 / .1), inset 0 1px 0 rgb(255 255 255 / .9); transform: translateX(calc(var(--seg-index, 0) * 100%)); transition: transform .3s var(--spring); }
+      .segmented button { position: relative; z-index: 1; min-height: 32px; border: 0; background: transparent; color: var(--label); cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity .16s ease; }
+      .segmented button:active { opacity: .55; }
+
+      /* ── 卡片与分组：实色扁平 ── */
+      .card { border-radius: var(--radius-card); background: var(--card); box-shadow: var(--shadow-card); }
+      .card-caption { margin: 0; padding: 16px 16px 0; color: var(--label-secondary); font-size: 13px; }
+      .list-card { padding: 0; overflow: hidden; margin: 0; list-style: none; }
+      .section-heading { display: flex; align-items: baseline; justify-content: space-between; padding: 0 2px 8px; }
+      .section-title { margin: 0; padding: 0 2px 8px; color: var(--label-secondary); font-size: 13px; font-weight: 500; }
+      .section-heading .section-title { padding: 0; }
+      .section-action { padding: 4px 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 15px; transition: opacity .16s ease; }
+      .section-action:active { opacity: .45; }
+
+      /* ── 汇总：可点击大卡（点开趋势+分类），纯黑数字 ── */
+      .summary-card { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 16px; padding: 16px; border: 0; text-align: left; cursor: pointer; transition: opacity .14s ease; }
+      .summary-card:active { opacity: .7; }
+      .summary-main { display: block; min-width: 0; }
+      .summary-label { display: block; color: var(--label-secondary); font-size: 13px; }
+      .summary-value { display: block; margin-top: 6px; font-size: 34px; font-weight: 700; letter-spacing: -.021em; line-height: 1.1; font-variant-numeric: tabular-nums lining-nums; }
+      .summary-chevron { width: 18px; height: 18px; flex: none; color: var(--label-tertiary); transition: transform .28s var(--spring); }
+      .summary-card[aria-expanded="true"] .summary-chevron { transform: rotate(180deg); }
+
+      /* ── 分类 / 明细行 ── */
+      .content-section { margin-top: 20px; }
+      .row { position: relative; display: grid; align-items: center; width: 100%; gap: 12px; padding: 12px 16px; border: 0; background: transparent; color: inherit; text-align: left; }
+      .row::after { position: absolute; right: 0; bottom: 0; left: 56px; height: 1px; background: var(--separator); content: ""; }
+      .row:last-child::after { content: none; }
+      .entry-row::after { content: none; }
+      .row:active { background: var(--fill); }
+      button.row { cursor: pointer; }
+      .category-row { grid-template-columns: 32px minmax(0, 1fr) auto 14px; }
+      .entry-row { grid-template-columns: 32px minmax(0, 1fr) auto; cursor: pointer; }
+      .sheet-delete { display: block; width: 100%; height: 44px; margin-top: 20px; border: 0; border-radius: var(--radius-card); background: var(--red-soft); color: var(--red); font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity .16s ease; }
+      .sheet-delete:active { opacity: .55; }
+      .sheet-delete.is-armed { background: var(--red); color: #fff; }
+      .row-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--fill); color: var(--label-secondary); }
+      .row-icon .icon { width: 17px; height: 17px; }
+      .category-main { min-width: 0; }
+      .category-name { display: block; font-size: 17px; letter-spacing: -.01em; }
+      .category-track { display: block; height: 3px; margin-top: 8px; overflow: hidden; border-radius: 999px; background: var(--bar-track); }
+      .category-fill { display: block; height: 100%; border-radius: inherit; background: #9a9aa0; }
+      .category-value { font-size: 17px; letter-spacing: -.01em; white-space: nowrap; font-variant-numeric: tabular-nums lining-nums; }
+      .category-arrow { width: 14px; height: 14px; color: var(--label-tertiary); }
+
+      .entry-main { min-width: 0; }
+      .entry-title { display: block; overflow: hidden; font-size: 17px; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+      .entry-meta { display: block; margin-top: 2px; color: var(--label-secondary); font-size: 13px; }
+      .entry-amount { font-size: 17px; letter-spacing: -.01em; white-space: nowrap; font-variant-numeric: tabular-nums lining-nums; }
+      /* 明细按日期分组（iOS 账单式）：组头灰字，空区间给一句说明而不是空白卡 */
+      .group-head { padding: 14px 16px 6px; color: var(--label-secondary); font-size: 13px; font-weight: 500; }
+      .group-head:first-child { padding-top: 14px; }
+      .list-empty { padding: 28px 16px; color: var(--label-tertiary); font-size: 15px; text-align: center; }
+
+      /* ── 趋势图：蓝渐变柱 + 平滑曲线双形态（图二UI） ── */
+      .chart-card { padding: 16px 16px 12px; }
+      .chart-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 4px; }
+      .chart-title { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+      .chart-tag { padding: 3px 10px; border-radius: 999px; background: var(--fill); color: var(--label-secondary); font-size: 13px; }
+      #trend-chart { display: block; width: 100%; height: 168px; overflow: visible; }
+      /* 图表滚动容器：柱数超 6 时按固定柱距撑宽并左右滑动 */
+      .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+      .chart-scroll::-webkit-scrollbar { display: none; }
+      .chart-grid { stroke: var(--separator); stroke-width: 1; }
+      .chart-axis-label { fill: var(--label-tertiary); stroke: none; font-family: var(--font); font-size: 11px; }
+      .chart-value-label { fill: var(--label-secondary); stroke: none; font-family: var(--font); font-size: 10px; font-weight: 500; }
+      .chart-expense-bar { fill: url(#bar-gradient); stroke: none; }
+      .chart-zero { fill: var(--label-tertiary); stroke: none; opacity: .5; }
+      .chart-line { fill: none; stroke: var(--line-stroke); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .chart-line-area { stroke: none; opacity: .12; }
+      .chart-line-dot { fill: var(--card); stroke: var(--line-stroke); stroke-width: 1.5; }
+      .chart-legend { display: flex; justify-content: center; padding-top: 10px; }
+      /* 柱状/曲线切换：图1分段胶囊（互斥切换） */
+      .chart-legend .segmented { width: min(200px, 60%); background: var(--fill); box-shadow: none; border-radius: 999px; }
+      .chart-legend .segmented__thumb { border-radius: 999px; }
+      .chart-legend .segmented button { min-height: 30px; }
+
+      /* ── 底部工具条 + 记一笔：图2质感红系药丸（居中、无白边） ── */
+      .action-bar { position: fixed; z-index: 20; bottom: 0; left: 0; right: 0; margin-inline: auto; width: min(100%, 430px); padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgb(242 242 247 / 0), rgb(242 242 247 / .92) 40%); pointer-events: none; }
+      .primary-action { display: flex; align-items: center; justify-content: center; width: fit-content; min-width: 148px; min-height: 44px; margin: 0 auto; gap: 6px; padding: 0 22px; border: 1.5px solid rgb(224 122 108 / .55); border-radius: 999px; background: var(--red-soft); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: 0 4px 18px rgb(224 122 108 / .22); color: var(--red); cursor: pointer; pointer-events: auto; font-size: 16px; font-weight: 600; letter-spacing: -.01em; transition: opacity .14s ease, transform .14s ease; }
+      .primary-action:active { opacity: .76; transform: scale(.97); }
+      .primary-action .icon { width: 18px; height: 18px; stroke-width: 2.2; }
+
+      /* ── 底部弹层：实色 + 三段式字段（标签在上、控件在下，8px 节奏） ── */
+      .sheet-backdrop { position: fixed; z-index: 40; inset: 0; background: rgb(0 0 0 / .32); opacity: 0; transition: opacity .3s ease; }
+      .sheet-backdrop.is-visible { opacity: 1; }
+      .bottom-sheet { position: fixed; z-index: 41; bottom: 0; left: 0; right: 0; margin-inline: auto; width: min(100%, 430px); max-height: 86dvh; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px calc(20px + env(safe-area-inset-bottom)); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; background: var(--card); transform: translateY(105%); transition: transform .42s var(--spring); }
+      .bottom-sheet.is-open { transform: translateY(0); }
+      .sheet-handle { width: 36px; height: 5px; margin: 0 auto 8px; border-radius: 999px; background: var(--label-tertiary); }
+      .sheet-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 44px; }
+      .sheet-header h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.02em; text-align: center; }
+      .sheet-close, .sheet-save { padding: 10px 4px; border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 17px; transition: opacity .16s ease; }
+      .sheet-close { justify-self: start; text-align: left; }
+      .sheet-save { justify-self: end; font-weight: 600; text-align: right; }
+      .sheet-save.is-muted { opacity: .35; }
+      .sheet-close:active, .sheet-save:active { opacity: .45; }
+
+      .sheet-field { margin-top: 20px; }
+      .field-label { margin: 0 0 8px; color: var(--label-secondary); font-size: 13px; font-weight: 500; }
+      /* 金额：弹层唯一大字号，空态用 0.00 占位锚定视觉，不靠边框 */
+      .amount-value { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--label); font-size: 34px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; outline: 0; font-variant-numeric: tabular-nums lining-nums; }
+      .amount-value::placeholder { color: var(--label-tertiary); }
+      /* 文本输入（备注 / 出游）：同一套实色字段 */
+      .text-field { width: 100%; min-width: 0; padding: 12px 14px; border: 1px solid transparent; border-radius: var(--radius-card); background: var(--inset); color: var(--label); font-size: 15px; outline: 0; transition: border-color .16s ease; }
+      .text-field::placeholder { color: var(--label-tertiary); }
+      .text-field:focus { border-color: var(--accent); }
+
+      /* 分类 chips：等宽 4 列网格；玻璃按钮底色改用灰填充——白弹层上纯白玻璃等于看不见 */
+      .category-chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+      .category-chips button { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; height: 40px; padding: 0 6px; border: 0; border-radius: 999px; background: var(--fill); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim), var(--glass-shadow); color: var(--label); cursor: pointer; font-size: 15px; transition: opacity .16s ease; }
+      .category-chips .icon { width: 15px; height: 15px; flex: none; }
+      .category-chips button:active { opacity: .6; }
+      .category-chips button.is-selected { background: var(--glass-accent-bg); box-shadow: var(--glass-accent-shadow); color: #fff; }
+      /* 子分类：与主分类同族但弱一档（实色底 + 浅蓝选中），固定 4 列与主网格同列宽，2 项也不被拉宽 */
+      .sub-row { margin-top: 8px; animation: sub-in .22s var(--spring); }
+      @keyframes sub-in { from { opacity: 0; transform: translateY(-4px); } }
+      .sub-chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+      .sub-chips button { min-width: 0; height: 32px; padding: 0 4px; border: 0; border-radius: 999px; background: var(--inset); color: var(--label-secondary); cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background .16s ease, color .16s ease, opacity .16s ease; }
+      .sub-chips button:active { opacity: .6; }
+      .sub-chips button.is-selected { background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); font-weight: 500; }
+      /* 日期：字段是入口按钮，日历自绘（原生 date 控件样式与整站不搭） */
+      .date-field { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 45px; padding: 12px 14px; border: 0; border-radius: var(--radius-card); background: var(--inset); color: var(--label); font-size: 15px; text-align: left; cursor: pointer; transition: opacity .16s ease; }
+      .date-field:active { opacity: .6; }
+      .date-caret { width: 15px; height: 15px; color: var(--label-tertiary); }
+      .calendar-sheet { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+      .cal-nav { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; align-items: center; padding: 2px 4px; }
+      .cal-nav-label { font-size: 17px; font-weight: 600; letter-spacing: -.02em; text-align: center; }
+      .cal-nav-btn { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 999px; background: transparent; color: var(--accent); cursor: pointer; transition: opacity .16s ease; }
+      .cal-nav-btn:active { opacity: .45; }
+      .cal-nav-btn:disabled { color: var(--label-tertiary); cursor: default; opacity: 1; }
+      .cal-nav-btn .icon { width: 18px; height: 18px; stroke-width: 2.2; }
+      .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); padding: 8px 0 2px; color: var(--label-secondary); font-size: 13px; text-align: center; }
+      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+      .cal-cell { display: grid; place-items: center; height: 44px; }
+      .cal-day { width: 34px; height: 34px; border: 0; border-radius: 999px; background: transparent; color: var(--label); cursor: pointer; font-size: 15px; text-align: center; font-variant-numeric: tabular-nums lining-nums; transition: opacity .14s ease; }
+      .cal-day:active { opacity: .55; }
+      .cal-day.is-today { color: var(--accent); font-weight: 600; }
+      .cal-day.is-selected { background: var(--accent); color: #fff; font-weight: 600; }
+
+      .manager-sheet { min-height: 340px; }
+      .manager-list { margin-top: 12px; }
+      .manager-list .row { grid-template-columns: 32px minmax(0, 1fr) 14px; }
+      .manager-name { font-size: 17px; letter-spacing: -.01em; }
+      .manager-list .category-arrow { width: 14px; height: 14px; color: var(--label-tertiary); }
+      .category-name-field { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-row); background: var(--inset); font-size: 17px; }
+      .category-name-field input { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--label); font-size: 17px; outline: 0; text-align: right; }
+      .icon-picker { margin-top: 20px; }
+      .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+      .icon-grid button { display: grid; place-items: center; aspect-ratio: 1; border: 1.5px solid transparent; border-radius: 50%; background: var(--fill); color: var(--label-secondary); cursor: pointer; transition: background .16s ease, border-color .16s ease, color .16s ease, opacity .16s ease; }
+      .icon-grid button .icon { width: 20px; height: 20px; }
+      .icon-grid button:active { opacity: .6; }
+      .icon-grid button.is-selected { border-color: var(--accent); background: transparent; color: var(--accent); }
+
+      .toast { position: fixed; z-index: 60; bottom: calc(96px + env(safe-area-inset-bottom)); left: 0; right: 0; margin-inline: auto; width: fit-content; max-width: calc(100% - 44px); padding: 11px 16px; border-radius: 999px; background: rgb(0 0 0 / .78); color: #fff; font-size: 15px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity .22s ease, transform .22s var(--spring); }
+      .toast.is-visible { opacity: 1; transform: translateY(0); }
+
+      @media (min-width: 700px) {
+        .app-shell { min-height: max(844px, 100dvh); border-left: 1px solid var(--separator); border-right: 1px solid var(--separator); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+      }
+      @media (prefers-reduced-transparency: reduce) {
+        .glass, .segmented, .legend-toggle, .action-bar, .nav__bg { background: rgb(255 255 255 / .92); backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .category-chips button { background: #eaeaef; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; }
+        .primary-action { background: var(--accent); backdrop-filter: none; -webkit-backdrop-filter: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="nav" id="nav" aria-label="顶部导航栏">
+      <div class="nav__bg" aria-hidden="true"></div>
+      <div class="nav__bar"><span class="nav__title" aria-hidden="true">Money</span></div>
+    </header>
+
+    <main class="app-shell" aria-label="Money 记账演示">
+      <h1 class="large-title">Money</h1>
+
+      <div class="period-row">
+        <div class="pager" role="group" aria-label="周期翻页">
+          <button type="button" class="pager-btn" id="period-prev" aria-label="上一周期">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+          </button>
+          <span class="pager-label" id="period-label">本月</span>
+          <button type="button" class="pager-btn" id="period-next" aria-label="下一周期">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
+        </div>
+        <div class="segmented" id="period-switch" role="tablist" aria-label="选择统计粒度">
+          <span class="segmented__thumb" aria-hidden="true"></span>
+          <button type="button" role="tab" aria-selected="false" data-period="week">周</button>
+          <button type="button" role="tab" aria-selected="true" data-period="month">月</button>
+          <button type="button" role="tab" aria-selected="false" data-period="year">年</button>
+          <button type="button" role="tab" aria-selected="false" data-period="all">全部</button>
+        </div>
+      </div>
+
+      <button class="card summary-card" id="summary-card" type="button" aria-expanded="false" aria-controls="expand-area">
+        <span class="summary-main">
+          <span class="summary-label" id="summary-label">本月支出</span>
+          <span class="summary-value" id="expense-value">1,876.40</span>
+        </span>
+        <svg class="icon summary-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+
+      <!-- 点汇总卡展开：支出趋势 + 分类（就地展开，平常隐藏） -->
+      <div class="expand-area" id="expand-area" hidden>
+        <section class="content-section" aria-label="支出趋势">
+          <div class="card chart-card" id="trend-panel">
+            <div class="chart-head">
+              <h3 class="chart-title">支出趋势</h3>
+              <span class="chart-tag">支出</span>
+            </div>
+            <div class="chart-scroll" id="chart-scroll">
+              <svg id="trend-chart" viewBox="0 0 344 152" role="img" aria-labelledby="chart-description">
+                <title id="chart-description">当期支出趋势图</title>
+              </svg>
+            </div>
+            <div class="chart-legend" role="tablist" aria-label="图表形态切换">
+              <div class="segmented" id="chart-switch">
+                <span class="segmented__thumb" aria-hidden="true"></span>
+                <button type="button" role="tab" data-chart-mode="bars" aria-selected="true">柱状</button>
+                <button type="button" role="tab" data-chart-mode="line" aria-selected="false">曲线</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="content-section" aria-labelledby="category-title">
+          <div class="section-heading">
+            <h2 class="section-title" id="category-title">分类</h2>
+            <button class="section-action" id="open-category-manager" type="button">编辑</button>
+          </div>
+          <div class="card list-card" id="category-list"></div>
+        </section>
+      </div>
+
+      <section class="content-section" aria-labelledby="detail-title">
+        <h2 class="section-title" id="detail-title">明细</h2>
+        <ol class="card list-card" id="entry-list"></ol>
+      </section>
+    </main>
+
+    <div class="action-bar">
+      <button class="primary-action" type="button" id="open-sheet" aria-label="新建一笔记账">
+        <span>记一笔</span>
+      </button>
+    </div>
+
+    <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+
+    <section class="bottom-sheet" id="record-sheet" aria-labelledby="sheet-title" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <button type="button" class="sheet-close" data-close-sheet>取消</button>
+        <h2 id="sheet-title">记一笔</h2>
+        <button type="button" class="sheet-save is-muted" id="save-record">完成</button>
+      </div>
+      <div class="sheet-field">
+        <p class="field-label">金额</p>
+        <input id="amount-input" class="amount-value" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="0.00" aria-label="金额" />
+      </div>
+      <div class="sheet-field">
+        <p class="field-label">日期</p>
+        <button type="button" class="date-field" id="date-field" aria-haspopup="dialog" aria-label="选择记账日期">
+          <span id="date-value">选择日期</span>
+          <svg class="icon date-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        </button>
+      </div>
+      <div class="sheet-field" role="group" aria-label="选择分类">
+        <p class="field-label">分类</p>
+        <div class="category-chips" id="category-chips"></div>
+        <div class="sub-row" id="sub-row" hidden></div>
+      </div>
+      <div class="sheet-field">
+        <p class="field-label">备注</p>
+        <input id="note-input" class="text-field" placeholder="写点什么（可选）" maxlength="24" aria-label="备注" enterkeyhint="done" autocomplete="off" />
+      </div>
+      <button type="button" class="sheet-delete" id="delete-record" hidden>删除这笔</button>
+    </section>
+
+    <section class="bottom-sheet calendar-sheet" id="date-sheet" aria-labelledby="date-sheet-title" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <button type="button" class="sheet-close" id="date-cancel">取消</button>
+        <h2 id="date-sheet-title">选择日期</h2>
+        <span aria-hidden="true"></span>
+      </div>
+      <div class="cal-nav">
+        <button type="button" class="cal-nav-btn" id="cal-prev" aria-label="上一月"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
+        <span class="cal-nav-label" id="cal-label">2026 年 10 月</span>
+        <button type="button" class="cal-nav-btn" id="cal-next" aria-label="下一月"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg></button>
+      </div>
+      <div class="cal-week" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+      <div class="cal-grid" id="cal-grid" role="grid" aria-label="选择日期"></div>
+    </section>
+
+    <section class="bottom-sheet manager-sheet" id="category-manager-sheet" aria-labelledby="category-manager-title" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <button type="button" class="sheet-close" data-close-sheet>完成</button>
+        <h2 id="category-manager-title">分类管理</h2>
+        <span aria-hidden="true"></span>
+      </div>
+      <div class="card list-card manager-list" id="category-manager-list"></div>
+    </section>
+
+    <section class="bottom-sheet" id="category-editor-sheet" aria-labelledby="category-editor-title" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <button type="button" class="sheet-close" id="back-to-category-manager">返回</button>
+        <h2 id="category-editor-title">编辑分类</h2>
+        <button type="button" class="sheet-save" id="save-category">完成</button>
+      </div>
+      <div class="icon-picker" aria-label="选择分类图标">
+        <p class="field-label">图标</p>
+        <div class="icon-grid" id="icon-grid">
+          <button type="button" data-icon="food" aria-label="餐饮"></button>
+          <button type="button" data-icon="shopping" aria-label="购物"></button>
+          <button type="button" data-icon="fun" aria-label="娱乐"></button>
+          <button type="button" data-icon="medical" aria-label="医疗"></button>
+          <button type="button" data-icon="social" aria-label="社交"></button>
+          <button type="button" data-icon="transport" aria-label="交通"></button>
+          <button type="button" data-icon="fixed" aria-label="固支"></button>
+          <button type="button" data-icon="travel" aria-label="出游"></button>
+          <button type="button" data-icon="pin" aria-label="其他"></button>
+          <button type="button" data-icon="home" aria-label="居住"></button>
+          <button type="button" data-icon="star" aria-label="订阅"></button>
+          <button type="button" data-icon="coffee" aria-label="咖啡"></button>
+        </div>
+      </div>
+    </section>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      /* 图标注册表：SF Symbols 风格细线 SVG（24 视框 / 1.5 描边） */
+      const ICONS = {
+        food: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 2v7a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V2M6 2v20M17 2c-1.7 2-2.5 4.2-2.5 6.5 0 1.7.8 2.5 2 2.5h1V22"/></svg>',
+        transport: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="13" rx="3"/><path d="M5 10h14M8 21l-2 2M16 21l2 2"/><circle cx="8.5" cy="13" r=".6"/><circle cx="15.5" cy="13" r=".6"/></svg>',
+        home: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-7 9 7v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 22v-8h6v8"/></svg>',
+        shopping: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2 3 6v14a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>',
+        star: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8l-6.2 3.2L7 14.2 2 9.3l6.9-1z"/></svg>',
+        pin: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>',
+        coffee: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4z"/><path d="M6 2v2M10 2v2M14 2v2"/></svg>',
+        gift: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12v10H4V12M2 7h20v5H2zM12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
+        leaf: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.5 19 2c1 2 2 4.2 2 8 0 5.5-4.8 10-10 10Z"/><path d="M2 21c0-3 1.9-5.4 5.1-6C9.5 14.5 12 13 13 12"/></svg>',
+        fun: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="11" rx="4"/><path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 13.5h.01"/></svg>',
+        medical: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/><rect x="3" y="3" width="18" height="18" rx="4"/></svg>',
+        social: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.5A5.5 5.5 0 0 1 22 20"/></svg>',
+        fixed: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/><circle cx="12" cy="15.5" r="1.5"/></svg>',
+        travel: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>',
+      };
+      const icon = (name) => ICONS[name] || ICONS.pin;
+
+      /* 分类体系（Jesse 2026-10-11 拍板固定）：children=[]无子类，[]=数组=子chips，"free"=出游日期城市自由填 */
+      const CATEGORIES = [
+        { id: "food", icon: "food", name: "餐饮", children: ["三餐", "烟酒", "水"] },
+        { id: "shopping", icon: "shopping", name: "购物", children: ["生活用品", "服装", "书本", "虚拟产品"] },
+        { id: "fun", icon: "fun", name: "娱乐", children: ["电影", "服务"] },
+        { id: "medical", icon: "medical", name: "医疗", children: ["保险", "药品", "疗服"] },
+        { id: "social", icon: "social", name: "社交", children: [] },
+        { id: "transport", icon: "transport", name: "交通", children: [] },
+        { id: "fixed", icon: "fixed", name: "固支", children: ["生活", "订阅"] },
+        { id: "travel", icon: "travel", name: "出游", children: "free" },
+      ];
+      const catById = (id) => CATEGORIES.find((item) => item.id === id) || CATEGORIES[0];
+
+      /* 聚合基线（expense/amounts/chart）仅演示排版；明细一律走 RECORDS 单一存储、按日期归属 */
+      const PERIODS = {
+        week: {
+          label: "本周支出",
+          expense: 486.0,
+          amounts: { food: 186, shopping: 98, fun: 76, medical: 0, social: 50, transport: 76, fixed: 0, travel: 0 },
+          chart: { labels: ["一", "二", "三", "四", "五", "六", "日"], expense: [0, 46, 92, 30, 126, 88, 104] },
+        },
+        month: {
+          label: "本月支出",
+          expense: 1876.4,
+          amounts: { food: 458.2, shopping: 320.5, fun: 156, medical: 86, social: 210, transport: 95.7, fixed: 250, travel: 300 },
+          chart: { labels: ["1", "5", "10", "15", "20", "25", "31"], expense: [12, 108, 54, 230, 172, 322, 286] },
+        },
+        year: {
+          label: "今年支出",
+          expense: 16782.4,
+          amounts: { food: 4288.2, shopping: 2495.5, fun: 1860, medical: 986, social: 2280, transport: 1382.7, fixed: 2500, travel: 1000 },
+          chart: { labels: ["1月", "3月", "5月", "7月", "9月", "10月"], expense: [1200, 1780, 1560, 2480, 1980, 1876] },
+        },
+      };
+
+      /* 全部模式：跨年累计，图表以年为单位（2019–2026，8 根演示 >6 滚动）；明细=近30天流水 */
+      const ALL_DATA = {
+        label: "全部支出",
+        expense: 112685.9,
+        amounts: { food: 32680.4, shopping: 21450.8, fun: 12680.2, medical: 6540.6, social: 14320.5, transport: 9872.4, fixed: 12400, travel: 2741 },
+        chart: { labels: ["2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026"], expense: [12430.5, 11860.2, 13240.8, 14520.3, 13980.6, 15640.2, 14230.9, 16782.4] },
+      };
+
+      const PERIOD_ORDER = ["week", "month", "year", "all"];
+      const CHEVRON = '<svg class="icon category-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>';
+
+      const state = {
+        period: "month",
+        page: { week: 0, month: 0, year: 0, all: 0 }, // 0=本期，1=上一期，…（各 tab 独立记页；全部不翻页）
+        selectedCategoryId: "food",
+        selectedSub: "", // 子分类 chips 选中项
+        subByCat: {}, // 各分类各自记住子分类选择，切走再切回不丢（与出游文本保留同口径）
+        travelText: "", // 出游的补充文本（独立保存，防重渲染丢字）
+        recordDate: "", // 弹层当前记账日期（YYYY-MM-DD）
+        calMonth: "", // 日历弹层展示的月份（YYYY-MM）
+        subOpen: false, // 子 chips 行展开态
+        selectedIcon: "food",
+        editingCategoryId: null,
+        editingEntryId: null, // 非空=编辑明细中的某笔
+        activeSheet: null,
+        chartMode: "bars", // 柱状/曲线互斥切换
+      };
+
+      const round2 = (value) => Math.round(value * 100) / 100;
+
+      /* 日期：状态存 ISO；记一笔字段永远显示完整日期，明细分组保留自然语言。 */
+      const isoOf = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const todayISO = () => isoOf(new Date());
+      function fullDateLabel(iso) {
+        const [year, month, day] = iso.split("-").map(Number);
+        return `${year} 年 ${month} 月 ${day} 日`;
+      }
+      function dateLabel(iso) {
+        const now = new Date();
+        if (!iso || iso === todayISO()) return "今天"; // 与演示数据同口径，避免今天既写「刚刚」又写「今天」
+        if (iso === isoOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return "昨天";
+        const [year, month, day] = iso.split("-").map(Number);
+        const sameYear = year === now.getFullYear();
+        return `${sameYear ? "" : `${year} 年 `}${month} 月 ${day} 日`;
+      }
+      /* 演示数据只有「今天 / 昨天 / 10 月 9 日」这类中文串，播种时按当年解析，落在未来的按去年处理 */
+      function dateFromMeta(meta) {
+        const head = meta.split(" · ")[0];
+        if (/^(今天|刚刚)$/.test(head)) return todayISO();
+        if (head === "昨天") return isoOf(new Date(Date.now() - 86400000));
+        const hit = head.match(/(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+        if (!hit) return todayISO();
+        const now = new Date();
+        const year = hit[1] ? Number(hit[1]) : now.getFullYear();
+        let date = new Date(year, Number(hit[2]) - 1, Number(hit[3]));
+        if (!hit[1] && date > now) date = new Date(year - 1, Number(hit[2]) - 1, Number(hit[3]));
+        return isoOf(date);
+      }
+
+      /* 演示流水种子：meta 只用于播种推算日期，之后 date 是记录的一等字段 */
+      const SEED = [
+        { icon: "food", cat: "food", sub: "三餐", title: "咖啡与早餐", meta: "今天 · 餐饮 · 三餐", amount: 36 },
+        { icon: "transport", cat: "transport", sub: "", title: "地铁出行", meta: "今天 · 交通", amount: 6 },
+        { icon: "food", cat: "food", sub: "水", title: "矿泉水", meta: "昨天 · 餐饮 · 水", amount: 3 },
+        { icon: "fixed", cat: "fixed", sub: "", title: "会员订阅", meta: "10 月 8 日 · 固支", amount: 25 },
+        { icon: "transport", cat: "transport", sub: "", title: "地铁出行", meta: "10 月 9 日 · 交通", amount: 6 },
+        { icon: "shopping", cat: "shopping", sub: "生活用品", title: "每周采购", meta: "10 月 8 日 · 购物 · 生活用品", amount: 128.5 },
+        { icon: "shopping", cat: "shopping", sub: "服装", title: "秋装", meta: "10 月 3 日 · 购物 · 服装", amount: 320 },
+        { icon: "fixed", cat: "fixed", sub: "", title: "房租", meta: "10 月 1 日 · 固支", amount: 2300 },
+        { icon: "transport", cat: "transport", sub: "", title: "地铁出行", meta: "9 月 28 日 · 交通", amount: 6 },
+        { icon: "food", cat: "food", sub: "烟酒", title: "朋友聚会酒水", meta: "9 月 26 日 · 餐饮 · 烟酒", amount: 186 },
+        { icon: "social", cat: "social", sub: "", title: "同事随礼", meta: "9 月 22 日 · 社交", amount: 200 },
+        { icon: "fun", cat: "fun", sub: "", title: "电影票", meta: "9 月 28 日 · 娱乐", amount: 88 },
+        { icon: "medical", cat: "medical", sub: "", title: "感冒药", meta: "9 月 20 日 · 医疗", amount: 46 },
+      ];
+      let recordSeq = 0;
+      const RECORDS = SEED.map((item) => ({ ...item, id: `demo-${++recordSeq}`, date: dateFromMeta(item.meta), demo: true, seq: recordSeq }));
+      const findRecord = (id) => RECORDS.find((record) => record.id === id);
+
+      /* 周期区间：记录归属的唯一依据。年/全部的明细口径沿用 v2.0 拍板的「近30天」 */
+      function periodRange(period, page) {
+        const now = new Date();
+        if (period === "week") {
+          const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7) - page * 7);
+          return [isoOf(monday), isoOf(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6))];
+        }
+        if (period === "month") {
+          const first = new Date(now.getFullYear(), now.getMonth() - page, 1);
+          return [isoOf(first), isoOf(new Date(first.getFullYear(), first.getMonth() + 1, 0))];
+        }
+        if (period === "year") {
+          const year = now.getFullYear() - page;
+          return [`${year}-01-01`, `${year}-12-31`];
+        }
+        return ["0000-01-01", "9999-12-31"];
+      }
+      /* 明细口径：年/全部的本期=近30天（v2.0 拍板）；翻页到历史年时给该年全部，避免翻到旧年仍显示近30天 */
+      function entriesRange(period, page) {
+        if (page === 0 && (period === "year" || period === "all")) {
+          const now = new Date();
+          return [isoOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)), todayISO()];
+        }
+        return periodRange(period, page);
+      }
+      const inRange = (iso, [start, end]) => iso >= start && iso <= end;
+      function entriesFor(period, page) {
+        const range = entriesRange(period, page);
+        return RECORDS.filter((record) => inRange(record.date, range)).sort((a, b) => (a.date === b.date ? b.seq - a.seq : (a.date < b.date ? 1 : -1)));
+      }
+      /* 聚合数 = 演示基线 + 用户记的笔（按区间归属）；演示种子不计入，保持拍板过的展示数字 */
+      function userDelta(period, page) {
+        const range = periodRange(period, page);
+        const rows = RECORDS.filter((record) => !record.demo && inRange(record.date, range));
+        const amounts = {};
+        rows.forEach((record) => { amounts[record.cat] = round2((amounts[record.cat] ?? 0) + record.amount); });
+        return { expense: round2(rows.reduce((sum, record) => sum + record.amount, 0)), amounts };
+      }
+      /* 保存后跳到能看见这笔的视图：当前视图已含则不动，否则就近落到包含该日期的周/月页 */
+      function viewForDate(iso) {
+        if (inRange(iso, periodRange("week", 0))) return { period: "week", page: 0 };
+        const now = new Date();
+        const [year, month] = iso.split("-").map(Number);
+        const monthsBack = (now.getFullYear() - year) * 12 + (now.getMonth() + 1 - month);
+        return { period: "month", page: monthsBack };
+      }
+
+      /* 历史周期随机基线：确定性生成（同一页永远同一数据），仅演示排版；用户记录不缓存、实时合并 */
+      const historyCache = new Map();
+      function hashSeed(text) {
+        let h = 2166136261;
+        for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+        return h >>> 0;
+      }
+      function mulberry32(seed) {
+        return () => {
+          seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+      function historyBase(period, page) {
+        const key = `${period}-${page}`;
+        if (historyCache.has(key)) return historyCache.get(key);
+        const base = PERIODS[period];
+        const rand = mulberry32(hashSeed(key));
+        const scale = 0.62 + rand() * 0.76;
+        const data = {
+          label: base.label,
+          expense: round2(base.expense * scale),
+          amounts: Object.fromEntries(Object.entries(base.amounts).map(([id, value]) => [id, round2(value * (0.7 + rand() * 0.6))])),
+          chart: {
+            labels: base.chart.labels,
+            expense: base.chart.expense.map((value) => round2(value * (0.5 + rand() * 1.05))),
+          },
+        };
+        historyCache.set(key, data);
+        return data;
+      }
+      function periodLabel(period, page) {
+        if (period === "week") {
+          if (page === 0) return "本周";
+          if (page === -1) return "下周";
+          if (page < 0) return `${Math.abs(page)}周后`;
+          if (page === 1) return "上周";
+          return `${page}周前`;
+        }
+        const now = new Date();
+        if (period === "month") {
+          return `${new Date(now.getFullYear(), now.getMonth() - page, 1).getMonth() + 1}月`;
+        }
+        return `${now.getFullYear() - page}`; // 年份裸数字：2026 / 2025
+      }
+
+      /* 汇总标题：年份带年字（2026年支出），全部写全部支出 */
+      function summaryLabel() {
+        if (state.period === "all") return "全部支出";
+        const label = periodLabel(state.period, state.page[state.period]);
+        return state.period === "year" ? `${label}年支出` : `${label}支出`;
+      }
+
+      const number = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+      const plain = (value) => number.format(value);
+      const $ = (selector) => document.querySelector(selector);
+      const $$ = (selector) => [...document.querySelectorAll(selector)];
+      const categoryList = $("#category-list");
+      const entryList = $("#entry-list");
+      const chart = $("#trend-chart");
+      const trendPanel = $("#trend-panel");
+      const toast = $("#toast");
+      const backdrop = $("#sheet-backdrop");
+      const nav = $("#nav");
+      const sheets = $$(".bottom-sheet");
+      let toastTimer;
+
+      /* 视图数据 = 演示基线（当前页或历史随机页）+ 用户记录按日期区间的增量；明细直接取区间内记录 */
+      function currentData() {
+        const period = state.period;
+        const page = state.page[period];
+        const base = period === "all" ? ALL_DATA : (page === 0 ? PERIODS[period] : historyBase(period, page));
+        const delta = userDelta(period, page);
+        return {
+          ...base,
+          expense: round2(base.expense + delta.expense),
+          amounts: Object.fromEntries(Object.entries(base.amounts).map(([id, value]) => [id, round2(value + (delta.amounts[id] ?? 0))])),
+          entries: entriesFor(period, page),
+        };
+      }
+
+      function categoryRows(amounts) {
+        return CATEGORIES.map((item) => ({ ...item, amount: amounts[item.id] ?? 0 }));
+      }
+
+      function showToast(message) {
+        window.clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2000);
+      }
+
+      function moveThumb(container, order, value) {
+        container.style.setProperty("--seg-count", order.length);
+        container.style.setProperty("--seg-index", Math.max(order.indexOf(value), 0));
+      }
+
+      function openSheet(sheetId, focusSelector) {
+        closeSheet({ immediate: true });
+        const sheet = $(sheetId);
+        state.activeSheet = sheetId;
+        backdrop.hidden = false;
+        requestAnimationFrame(() => {
+          if (state.activeSheet !== sheetId) return; // 期间被别的弹层接管，补帧不再把旧弹层顶回来
+          backdrop.classList.add("is-visible");
+          sheet.classList.add("is-open");
+        });
+        sheet.setAttribute("aria-hidden", "false");
+        if (focusSelector) window.setTimeout(() => $(focusSelector)?.focus(), 260);
+      }
+
+      function closeSheet({ immediate = false } = {}) {
+        sheets.forEach((sheet) => {
+          sheet.classList.remove("is-open");
+          sheet.setAttribute("aria-hidden", "true");
+        });
+        backdrop.classList.remove("is-visible");
+        state.activeSheet = null;
+        const hide = () => { backdrop.hidden = true; };
+        if (immediate) hide(); else window.setTimeout(hide, 320);
+      }
+
+      function renderCategoryChips() {
+        const chipBox = $("#category-chips");
+        chipBox.innerHTML = CATEGORIES.map((category) => `
+          <button type="button" data-category-id="${escapeHtml(category.id)}" aria-pressed="${String(category.id === state.selectedCategoryId)}" class="${category.id === state.selectedCategoryId ? "is-selected" : ""}">${icon(category.icon)}<span>${escapeHtml(category.name)}</span></button>
+        `).join("");
+        renderSubRow();
+      }
+
+      /* 子分类行：餐饮/购物点开子 chips；出游变日期+城市文本框；其余隐藏 */
+      function renderSubRow() {
+        const box = $("#sub-row");
+        const live = $("#sub-travel-input");
+        if (live) state.travelText = live.value; // 重渲染前同步已输入文本，防丢字
+        const category = catById(state.selectedCategoryId);
+        if (category.children === "free") {
+          box.hidden = false;
+          box.innerHTML = `<input id="sub-travel-input" class="text-field" maxlength="16" aria-label="出游补充内容" enterkeyhint="done" value="${escapeHtml(state.travelText)}" />`;
+        } else if (Array.isArray(category.children) && category.children.length && state.subOpen) {
+          box.hidden = false;
+          box.innerHTML = `<div class="sub-chips" role="group" aria-label="${escapeHtml(category.name)}子分类">${category.children.map((sub) => `
+            <button type="button" data-sub="${escapeHtml(sub)}" aria-pressed="${String(sub === state.selectedSub)}" class="${sub === state.selectedSub ? "is-selected" : ""}">${escapeHtml(sub)}</button>
+          `).join("")}</div>`;
+        } else {
+          box.hidden = true;
+          box.innerHTML = "";
+        }
+      }
+
+      function renderCategories(amounts) {
+        const rows = categoryRows(amounts);
+        const max = Math.max(...rows.map((item) => item.amount), 1);
+        categoryList.innerHTML = rows.map((item) => `
+          <button class="row category-row" type="button" data-category-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(item.name)}分类">
+            <span class="row-icon" aria-hidden="true">${icon(item.icon)}</span>
+            <span class="category-main"><span class="category-name">${escapeHtml(item.name)}</span><span class="category-track"><span class="category-fill" style="width:${item.amount ? Math.max(8, (item.amount / max) * 100) : 0}%"></span></span></span>
+            <strong class="category-value">${plain(item.amount)}</strong>
+          </button>
+        `).join("");
+      }
+
+      function renderManagerList() {
+        const list = $("#category-manager-list");
+        list.innerHTML = CATEGORIES.map((category) => `
+          <button class="row manager-row" type="button" data-category-id="${escapeHtml(category.id)}" aria-label="更换${escapeHtml(category.name)}图标">
+            <span class="row-icon" aria-hidden="true">${icon(category.icon)}</span>
+            <span class="manager-name">${escapeHtml(category.name)}</span>
+            ${CHEVRON}
+          </button>
+        `).join("");
+      }
+
+      function renderChart(data) {
+        const baseline = 118;
+        const maxExpense = Math.max(...data.expense, 1);
+        /* 滚动仅作用于全部模式（年为单位）：年数 >6 固定柱距撑宽并左右滑动，≤6 自适应；周/月/年始终满宽 */
+        const n = data.labels.length;
+        const scrollMode = state.period === "all" && n > 6;
+        const col = 52;
+        const width = scrollMode ? 16 * 2 + col * n : 344;
+        const step = scrollMode ? col : 312 / Math.max(n - 1, 1);
+        const center = (index) => (scrollMode ? 16 + col * index + col / 2 : 16 + step * index);
+        chart.setAttribute("viewBox", `0 0 ${width} 152`);
+        chart.style.width = scrollMode ? `${width}px` : "100%";
+        const yOf = (value) => baseline - (value ? Math.max(5, (value / maxExpense) * 88) : 4);
+        const grid = [24, 71, 118].map((y) => `<line class="chart-grid" x1="16" x2="${width - 16}" y1="${y}" y2="${y}" />`).join("");
+
+        const bars = state.chartMode === "bars" ? data.expense.map((value, index) => {
+          const x = center(index) - 4;
+          const y = yOf(value);
+          return `<rect class="${value ? "chart-expense-bar" : "chart-zero"}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="8" height="${(baseline - y).toFixed(1)}" rx="2" />`;
+        }).join("") : "";
+
+        const points = data.expense.map((value, index) => [center(index), yOf(value)]);
+        const smooth = (pts) => pts.map((p, i) => {
+          if (!i) return `M${p[0].toFixed(1)} ${p[1].toFixed(1)}`;
+          const prev = pts[i - 1];
+          const midX = (prev[0] + p[0]) / 2;
+          return `C${midX.toFixed(1)} ${prev[1].toFixed(1)}, ${midX.toFixed(1)} ${p[1].toFixed(1)}, ${p[0].toFixed(1)} ${p[1].toFixed(1)}`;
+        }).join(" ");
+        const path = smooth(points);
+        const area = `M${points[0][0].toFixed(1)} ${baseline} ` + path.replace(/^M/, "L") + ` L${points[points.length - 1][0].toFixed(1)} ${baseline} Z`;
+        const line = state.chartMode === "line"
+          ? `<path class="chart-line-area" d="${area}" style="fill:var(--line-stroke)" />${data.expense.map((value, index) => (value ? `<circle class="chart-line-dot" cx="${center(index).toFixed(1)}" cy="${yOf(value).toFixed(1)}" r="2.5" />` : "")).join("")}<path class="chart-line" d="${path}" />`
+          : "";
+
+        const labels = data.labels.map((label, index) => `<text class="chart-axis-label" x="${center(index).toFixed(1)}" y="147" text-anchor="middle">${escapeHtml(label)}</text>`).join("");
+        /* 数值标注：柱状压柱顶上方 6px，曲线压点上方 8px */
+        const chartNum = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
+        const valueOffset = state.chartMode === "bars" ? 6 : 8;
+        const values = data.expense.map((value, index) => `<text class="chart-value-label" x="${center(index).toFixed(1)}" y="${(yOf(value) - valueOffset).toFixed(1)}" text-anchor="middle">${chartNum.format(value)}</text>`).join("");
+        chart.innerHTML = `<title id="chart-description">当期支出趋势，柱状与曲线为同一支出序列</title><defs><linearGradient id="bar-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--bar-top)" /><stop offset="1" style="stop-color:var(--bar-bottom)" /></linearGradient></defs>${grid}${bars}${line}${values}${labels}`;
+        const scrollBox = $("#chart-scroll");
+        const stickRight = () => { scrollBox.scrollLeft = scrollBox.scrollWidth; };
+        stickRight(); // 滚动模式停在最新年份
+        requestAnimationFrame(stickRight); // 布局落定后补一发，防首帧不生效
+      }
+
+      /* 明细副标题＝分类路径；日期由组头承担不再重复，标题已是分类名时也不再重复 */
+      function entryMeta(record) {
+        const category = catById(record.cat);
+        if (record.title === category.name) return record.sub || "";
+        return [category.name, record.sub].filter(Boolean).join(" · ");
+      }
+
+      function renderEntries(entries) {
+        if (!entries.length) {
+          entryList.innerHTML = '<li class="list-empty">这一段还没有记录</li>';
+          return;
+        }
+        let head = "";
+        entryList.innerHTML = entries.map((entry) => {
+          const label = dateLabel(entry.date);
+          const group = label === head ? "" : `<li class="group-head" aria-hidden="true">${escapeHtml(label)}</li>`;
+          head = label;
+          return `${group}
+          <li class="row entry-row" data-entry-id="${escapeHtml(entry.id)}" role="button" tabindex="0" aria-label="编辑${escapeHtml(entry.title)}">
+            <span class="row-icon" aria-hidden="true">${icon(entry.icon)}</span>
+            <span class="entry-main"><span class="entry-title">${escapeHtml(entry.title)}</span><span class="entry-meta">${escapeHtml(entryMeta(entry))}</span></span>
+            <strong class="entry-amount">${plain(entry.amount)}</strong>
+          </li>`;
+        }).join("");
+      }
+
+      function render() {
+        const data = currentData();
+        const isAll = state.period === "all";
+        const isYear = state.period === "year";
+        $("#period-label").textContent = isAll ? "全部" : periodLabel(state.period, state.page[state.period]);
+        $("#summary-label").textContent = summaryLabel();
+        $("#expense-value").textContent = plain(data.expense);
+        $("#period-prev").disabled = isAll;
+        $("#period-next").disabled = isAll;
+        /* 明细口径：周=本周全部单笔，月=当月，年/全部的本期=近30天，历史年=该年全部 */
+        const near30 = state.page[state.period] === 0 && (isYear || isAll);
+        $("#detail-title").textContent = near30 ? "近30天明细" : "明细";
+        renderCategories(data.amounts);
+        renderCategoryChips();
+        renderManagerList();
+        renderEntries(data.entries);
+        renderChart(data.chart);
+        $$('[data-period]').forEach((button) => {
+          button.setAttribute("aria-selected", String(button.dataset.period === state.period));
+        });
+        moveThumb($("#period-switch"), PERIOD_ORDER, state.period);
+      }
+
+      function openCategoryEditor(categoryId = null) {
+        const category = catById(categoryId);
+        state.editingCategoryId = category.id;
+        state.selectedIcon = category.icon;
+        $("#category-editor-title").textContent = `${category.name} · 图标`;
+        $$("#icon-grid button").forEach((button) => {
+          button.classList.toggle("is-selected", button.dataset.icon === state.selectedIcon);
+          button.innerHTML = icon(button.dataset.icon);
+        });
+        openSheet("#category-editor-sheet");
+      }
+
+      function saveCategory() {
+        const category = catById(state.editingCategoryId);
+        category.icon = state.selectedIcon;
+        render();
+        openSheet("#category-manager-sheet");
+        showToast("图标已更换");
+      }
+
+      /* 金额输入：只留数字与一个小数点、小数最多两位、去前导零；失焦补成两位 */
+      function sanitizeAmount(value) {
+        let text = value.replace(/[^\d.]/g, "");
+        const dot = text.indexOf(".");
+        if (dot > -1) text = `${text.slice(0, dot + 1)}${text.slice(dot + 1).replace(/\./g, "").slice(0, 2)}`;
+        return text.replace(/^0+(?=\d)/, "");
+      }
+
+      function readRecordForm() {
+        const raw = $("#amount-input").value.trim();
+        if (!/^\d{1,7}(\.\d{1,2})?$/.test(raw) || Number(raw) <= 0) {
+          showToast(raw ? "金额格式不对，最多两位小数" : "请输入大于 0 的金额");
+          $("#amount-input").focus();
+          return null;
+        }
+        const iso = state.recordDate || todayISO();
+        const category = catById(state.selectedCategoryId);
+        const note = $("#note-input").value.trim() || category.name;
+        const sub = category.children === "free" ? ($("#sub-travel-input")?.value.trim() || state.travelText.trim() || "") : (state.selectedSub || "");
+        return { amount: round2(Number(raw)), category, note, sub, iso, when: dateLabel(iso) };
+      }
+
+      /* 日期弹层：自绘月历，过去与未来日期均可选；选完回到记一笔表单。 */
+      function syncDateField() {
+        $("#date-value").textContent = fullDateLabel(state.recordDate);
+      }
+      function renderCalendar() {
+        const [year, month] = state.calMonth.split("-").map(Number);
+        const today = todayISO();
+        $("#cal-label").textContent = `${year} 年 ${month} 月`;
+        const lead = (new Date(year, month - 1, 1).getDay() + 6) % 7; // 周一起排
+        const days = new Date(year, month, 0).getDate();
+        let html = '<span class="cal-cell"></span>'.repeat(lead);
+        for (let day = 1; day <= days; day += 1) {
+          const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const cls = ["cal-day"];
+          if (iso === state.recordDate) cls.push("is-selected");
+          else if (iso === today) cls.push("is-today");
+          html += `<span class="cal-cell"><button type="button" class="${cls.join(" ")}" data-date="${iso}" role="gridcell" aria-label="${year} 年 ${month} 月 ${day} 日">${day}</button></span>`;
+        }
+        $("#cal-grid").innerHTML = html;
+      }
+      function shiftMonth(step) {
+        const [year, month] = state.calMonth.split("-").map(Number);
+        const date = new Date(year, month - 1 + step, 1);
+        state.calMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+        renderCalendar();
+      }
+      function openDateSheet() {
+        state.calMonth = (state.recordDate || todayISO()).slice(0, 7);
+        renderCalendar();
+        openSheet("#date-sheet");
+      }
+      function pickDate(iso) {
+        state.recordDate = iso;
+        syncDateField();
+        openSheet("#record-sheet");
+      }
+      /* 关闭当前最上层：日历回到表单，表单才真正收起 */
+      function closeTopSheet() {
+        if (state.activeSheet === "#date-sheet") openSheet("#record-sheet");
+        else closeSheet();
+      }
+      /* 完成按钮：金额无效时弱显（仍可点，点击给 toast 说明原因，不静默吞掉） */
+      function syncSaveState() {
+        const raw = $("#amount-input").value.trim();
+        $("#save-record").classList.toggle("is-muted", !(/^\d{1,7}(\.\d{1,2})?$/.test(raw) && Number(raw) > 0));
+      }
+
+      function saveRecord() {
+        const form = readRecordForm();
+        if (!form) return;
+        const { amount, category, note, sub, iso } = form;
+        const wasEdit = state.editingEntryId != null;
+        if (wasEdit) {
+          /* 编辑：单一存储里改这一条，所有含该日期的视图自动同步 */
+          const record = findRecord(state.editingEntryId);
+          if (record) Object.assign(record, { amount, cat: category.id, icon: category.icon, sub, title: note, date: iso });
+          state.editingEntryId = null;
+        } else {
+          recordSeq += 1;
+          RECORDS.push({ id: `u${recordSeq}`, date: iso, cat: category.id, icon: category.icon, sub, title: note, amount, demo: false, seq: recordSeq });
+        }
+        /* 当前视图看不见这笔时才跳视图，跳到包含该日期的周/月/年/全部 */
+        if (!inRange(iso, entriesRange(state.period, state.page[state.period]))) {
+          const view = viewForDate(iso);
+          state.period = view.period;
+          state.page[view.period] = view.page;
+        }
+        render();
+        closeSheet();
+        showToast(wasEdit ? "已保存修改" : "已记下这笔支出");
+      }
+
+      /* 记一笔弹层两种打开方式：新建（空表单）/ 编辑（预填+删除） */
+      function openRecordSheet() {
+        state.editingEntryId = null;
+        $("#sub-row").innerHTML = "";
+        $("#sub-row").hidden = true;
+        state.selectedCategoryId = "food";
+        state.selectedSub = "";
+        state.travelText = "";
+        state.subByCat = {};
+        state.subOpen = true;
+        $("#sheet-title").textContent = "记一笔";
+        $("#save-record").textContent = "完成";
+        $("#amount-input").value = "";
+        state.recordDate = todayISO();
+        syncDateField();
+        $("#note-input").value = "";
+        const del = $("#delete-record");
+        del.hidden = true;
+        del.classList.remove("is-armed");
+        del.textContent = "删除这笔";
+        renderCategoryChips();
+        syncSaveState();
+        openSheet("#record-sheet", "#amount-input");
+      }
+
+      function openEntryEditor(entryId) {
+        const hit = findRecord(entryId);
+        if (!hit) return;
+        state.editingEntryId = entryId;
+        $("#sub-row").innerHTML = "";
+        $("#sub-row").hidden = true;
+        state.selectedCategoryId = hit.cat;
+        const category = catById(hit.cat);
+        if (category.children === "free") {
+          state.travelText = hit.sub || "";
+          state.selectedSub = "";
+          state.subOpen = false;
+        } else {
+          state.selectedSub = hit.sub || "";
+          state.travelText = "";
+          state.subOpen = Array.isArray(category.children) && category.children.length > 0;
+        }
+        $("#sheet-title").textContent = "编辑账目";
+        $("#save-record").textContent = "保存";
+        $("#amount-input").value = hit.amount.toFixed(2);
+        state.recordDate = hit.date;
+        syncDateField();
+        $("#note-input").value = hit.title;
+        const del = $("#delete-record");
+        del.hidden = false;
+        del.classList.remove("is-armed");
+        del.textContent = "删除这笔";
+        renderCategoryChips();
+        syncSaveState();
+        openSheet("#record-sheet", "#amount-input");
+      }
+
+      $$("[data-period]").forEach((button) => button.addEventListener("click", () => {
+        state.period = button.dataset.period;
+        render();
+      }));
+
+      $("#period-prev").addEventListener("click", () => {
+        state.page[state.period] += 1;
+        render();
+      });
+      $("#period-next").addEventListener("click", () => {
+        state.page[state.period] -= 1;
+        render();
+      });
+
+      /* 汇总卡就地展开：支出趋势 + 分类 */
+      function setExpand(open) {
+        $("#expand-area").hidden = !open;
+        $("#summary-card").setAttribute("aria-expanded", String(open));
+      }
+      function collapseExpand() {
+        setExpand(false);
+      }
+      $("#summary-card").addEventListener("click", () => {
+        setExpand($("#expand-area").hidden);
+      });
+
+      $("#open-sheet").addEventListener("click", openRecordSheet);
+      $("#date-field").addEventListener("click", openDateSheet);
+      $("#date-cancel").addEventListener("click", () => openSheet("#record-sheet"));
+      $("#cal-prev").addEventListener("click", () => shiftMonth(-1));
+      $("#cal-next").addEventListener("click", () => shiftMonth(1));
+      $("#cal-grid").addEventListener("click", (event) => {
+        const cell = event.target.closest("[data-date]");
+        if (cell && !cell.disabled) pickDate(cell.dataset.date);
+      });
+      $("#open-category-manager").addEventListener("click", () => openSheet("#category-manager-sheet"));
+      $("#save-record").addEventListener("click", saveRecord);
+      $("#amount-input").addEventListener("input", (event) => {
+        const cleaned = sanitizeAmount(event.target.value);
+        if (cleaned !== event.target.value) event.target.value = cleaned;
+        syncSaveState();
+      });
+      $("#amount-input").addEventListener("blur", (event) => {
+        if (/^\d{1,7}(\.\d{1,2})?$/.test(event.target.value) && Number(event.target.value) > 0) event.target.value = Number(event.target.value).toFixed(2);
+      });
+      /* enterkeyhint=done 落地：金额/备注上按回车即入账 */
+      ["#amount-input", "#note-input"].forEach((selector) => $(selector).addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        saveRecord();
+      }));
+      $("#save-category").addEventListener("click", saveCategory);
+      $("#back-to-category-manager").addEventListener("click", () => openSheet("#category-manager-sheet"));
+      $$("[data-close-sheet]").forEach((button) => button.addEventListener("click", () => closeSheet()));
+      backdrop.addEventListener("click", closeTopSheet);
+
+      categoryList.addEventListener("click", (event) => {
+        const row = event.target.closest("[data-category-id]");
+        if (row) openCategoryEditor(row.dataset.categoryId);
+      });
+
+      $("#category-manager-list").addEventListener("click", (event) => {
+        const row = event.target.closest("[data-category-id]");
+        if (row) openCategoryEditor(row.dataset.categoryId);
+      });
+
+      $("#category-chips").addEventListener("click", (event) => {
+        const chip = event.target.closest("[data-category-id]");
+        if (!chip) return;
+        const id = chip.dataset.categoryId;
+        const category = catById(id);
+        if (id === state.selectedCategoryId) {
+          if (Array.isArray(category.children) && category.children.length) state.subOpen = !state.subOpen; // 再点同一分类：收/开子行（出游重点击保留已输入文本）
+        } else {
+          state.selectedCategoryId = id;
+          state.selectedSub = state.subByCat[id] || "";
+          state.subOpen = Array.isArray(category.children) && category.children.length > 0;
+        }
+        renderCategoryChips();
+      });
+
+      $("#sub-row").addEventListener("click", (event) => {
+        const subButton = event.target.closest("[data-sub]");
+        if (!subButton) return;
+        state.selectedSub = state.selectedSub === subButton.dataset.sub ? "" : subButton.dataset.sub;
+        state.subByCat[state.selectedCategoryId] = state.selectedSub;
+        renderSubRow();
+      });
+      $("#sub-row").addEventListener("input", (event) => {
+        if (event.target.id === "sub-travel-input") state.travelText = event.target.value; // 输入即时入 state
+      });
+
+      entryList.addEventListener("click", (event) => {
+        const row = event.target.closest("[data-entry-id]");
+        if (row) openEntryEditor(row.dataset.entryId);
+      });
+
+      /* 删除账目：两击确认防误触（第一次武装，第二次执行并跨周期同步） */
+      $("#delete-record").addEventListener("click", () => {
+        const btn = $("#delete-record");
+        const id = state.editingEntryId;
+        if (id == null) return;
+        if (!btn.classList.contains("is-armed")) {
+          btn.classList.add("is-armed");
+          btn.textContent = "确认删除这笔？再点一次";
+          return;
+        }
+        const index = RECORDS.findIndex((record) => record.id === id);
+        if (index > -1) RECORDS.splice(index, 1);
+        state.editingEntryId = null;
+        render();
+        closeSheet();
+        showToast("已删除这笔支出");
+      });
+
+      $("#icon-grid").addEventListener("click", (event) => {
+        const iconButton = event.target.closest("[data-icon]");
+        if (!iconButton) return;
+        state.selectedIcon = iconButton.dataset.icon;
+        $$("#icon-grid button").forEach((button) => button.classList.toggle("is-selected", button === iconButton));
+      });
+
+      $$("[data-chart-mode]").forEach((button) => button.addEventListener("click", () => {
+        state.chartMode = button.dataset.chartMode;
+        $$('[data-chart-mode]').forEach((candidate) => {
+          candidate.setAttribute("aria-selected", String(candidate === button));
+        });
+        moveThumb($("#chart-switch"), ["bars", "line"], state.chartMode);
+        renderChart(currentData().chart);
+      }));
+
+      let navTicking = false;
+      const syncNav = () => {
+        nav.classList.toggle("is-condensed", window.scrollY > 28);
+        navTicking = false;
+      };
+      window.addEventListener("scroll", () => {
+        if (navTicking) return;
+        navTicking = true;
+        requestAnimationFrame(syncNav);
+      }, { passive: true });
+
+      document.addEventListener("keydown", (event) => { if (event.key === "Escape" && state.activeSheet) closeTopSheet(); });
+
+      moveThumb($("#chart-switch"), ["bars", "line"], state.chartMode);
+      moveThumb($("#period-switch"), PERIOD_ORDER, state.period);
+      syncNav();
+      render();
+    </script>
+  </body>
+</html>
