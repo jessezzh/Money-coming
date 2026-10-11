@@ -8,10 +8,11 @@
     <meta name="format-detection" content="telephone=no" />
     <title>Money · 记账</title>
     <style>
-      /* Money · Apple 设计语言（单文件版 v2.7）
+      /* Money · Apple 设计语言（单文件版 v3.0 · CloudBase 云库版）
          设计原则：①仅浅色，无暗黑 ②只记支出，数字纯黑无¥无红绿
          ③玻璃只给按钮类控件（iOS 26 Liquid Glass），卡片实色扁平
-         ④间距 8px 节奏，字阶 34/17/15/13 */
+         ④间距 8px 节奏，字阶 34/17/15/13
+         数据：腾讯云开发 CloudBase 云库 records 集合，两人共用一个账号同步记账 */
 
       :root {
         color-scheme: light;
@@ -256,6 +257,28 @@
       .toast { position: fixed; z-index: 60; bottom: calc(96px + env(safe-area-inset-bottom)); left: 0; right: 0; margin-inline: auto; width: fit-content; max-width: calc(100% - 44px); padding: 11px 16px; border-radius: 999px; background: rgb(0 0 0 / .78); color: #fff; font-size: 15px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity .22s ease, transform .22s var(--spring); }
       .toast.is-visible { opacity: 1; transform: translateY(0); }
 
+      /* ── 登录页：全屏覆盖层（CloudBase 用户名密码登录） ── */
+      .login-screen { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--page); }
+      .login-card { width: min(100%, 380px); padding: 28px 22px 22px; border-radius: 16px; background: var(--card); box-shadow: var(--shadow-card); }
+      .login-title { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -.021em; line-height: 1.15; }
+      .login-sub { margin: 8px 0 0; color: var(--label-secondary); font-size: 13px; }
+      .login-card .sheet-field { margin-top: 16px; }
+      .login-submit { width: 100%; min-height: 46px; border: 0; border-radius: var(--radius-card); background: var(--glass-accent-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-accent-shadow); color: #fff; cursor: pointer; font-size: 17px; font-weight: 600; transition: opacity .16s ease; }
+      .login-submit:active { opacity: .75; }
+      .login-submit:disabled { opacity: .5; cursor: default; }
+      .login-error { margin: 12px 0 0; color: var(--red); font-size: 13px; }
+      .login-error:not(:empty) { padding: 10px 12px; border-radius: var(--radius-row); background: var(--red-soft); }
+
+      /* ── 记账人胶囊：与分类 chips 同族玻璃胶囊（选中态玻璃蓝） ── */
+      .payer-chips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .payer-chips button { height: 36px; border: 0; border-radius: 999px; background: var(--fill); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim), var(--glass-shadow); color: var(--label); cursor: pointer; font-size: 15px; transition: opacity .16s ease; }
+      .payer-chips button:active { opacity: .6; }
+      .payer-chips button.is-selected { background: var(--glass-accent-bg); box-shadow: var(--glass-accent-shadow); color: #fff; }
+
+      /* ── 退出登录：页面最下方小号灰字 ── */
+      .logout-link { display: block; margin: 28px auto 0; padding: 8px 14px; border: 0; background: transparent; color: var(--label-tertiary); cursor: pointer; font-size: 13px; transition: opacity .16s ease; }
+      .logout-link:active { opacity: .55; }
+
       @media (min-width: 700px) {
         .app-shell { min-height: max(844px, 100dvh); border-left: 1px solid var(--separator); border-right: 1px solid var(--separator); }
       }
@@ -266,8 +289,10 @@
         .glass, .segmented, .legend-toggle, .action-bar, .nav__bg { background: rgb(255 255 255 / .92); backdrop-filter: none; -webkit-backdrop-filter: none; }
         .category-chips button { background: #eaeaef; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; }
         .primary-action { background: var(--accent); backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .login-submit, .payer-chips button.is-selected { background: var(--accent); backdrop-filter: none; -webkit-backdrop-filter: none; }
       }
     </style>
+    <script src="https://static.cloudbase.net/cloudbase-js-sdk/latest/cloudbase.full.js"></script>
   </head>
   <body>
     <header class="nav" id="nav" aria-label="顶部导航栏">
@@ -341,6 +366,8 @@
         <h2 class="section-title" id="detail-title">明细</h2>
         <ol class="card list-card" id="entry-list"></ol>
       </section>
+
+      <button type="button" class="logout-link" id="logout-btn">退出登录</button>
     </main>
 
     <div class="action-bar">
@@ -377,6 +404,13 @@
       <div class="sheet-field">
         <p class="field-label">备注</p>
         <input id="note-input" class="text-field" placeholder="写点什么（可选）" maxlength="24" aria-label="备注" enterkeyhint="done" autocomplete="off" />
+      </div>
+      <div class="sheet-field" role="group" aria-label="记账人">
+        <p class="field-label">记账人</p>
+        <div class="payer-chips" id="payer-chips">
+          <button type="button" data-payer="我" aria-pressed="true" class="is-selected">我</button>
+          <button type="button" data-payer="TA" aria-pressed="false">TA</button>
+        </div>
       </div>
       <button type="button" class="sheet-delete" id="delete-record" hidden>删除这笔</button>
     </section>
@@ -433,6 +467,27 @@
       </div>
     </section>
 
+    <section class="login-screen" id="login-screen" role="dialog" aria-modal="true" aria-label="登录" hidden>
+      <div class="login-card">
+        <h1 class="login-title">Money · 记账</h1>
+        <p class="login-sub">两人共用一个账号，账目云端同步</p>
+        <form id="login-form" autocomplete="off">
+          <div class="sheet-field">
+            <p class="field-label">用户名</p>
+            <input id="login-username" class="text-field" placeholder="用户名 / 邮箱 / 手机号" aria-label="用户名" autocomplete="username" enterkeyhint="next" />
+          </div>
+          <div class="sheet-field">
+            <p class="field-label">密码</p>
+            <input id="login-password" class="text-field" type="password" placeholder="密码" aria-label="密码" autocomplete="current-password" enterkeyhint="done" />
+          </div>
+          <div class="sheet-field">
+            <button type="submit" class="login-submit" id="login-submit">登录</button>
+          </div>
+        </form>
+        <p class="login-error" id="login-error" role="alert"></p>
+      </div>
+    </section>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <script>
@@ -468,52 +523,28 @@
       ];
       const catById = (id) => CATEGORIES.find((item) => item.id === id) || CATEGORIES[0];
 
-      /* 聚合基线（expense/amounts/chart）仅演示排版；明细一律走 RECORDS 单一存储、按日期归属 */
-      const PERIODS = {
-        week: {
-          label: "本周支出",
-          expense: 486.0,
-          amounts: { food: 186, shopping: 98, fun: 76, medical: 0, social: 50, transport: 76, fixed: 0, travel: 0 },
-          chart: { labels: ["一", "二", "三", "四", "五", "六", "日"], expense: [0, 46, 92, 30, 126, 88, 104] },
-        },
-        month: {
-          label: "本月支出",
-          expense: 1876.4,
-          amounts: { food: 458.2, shopping: 320.5, fun: 156, medical: 86, social: 210, transport: 95.7, fixed: 250, travel: 300 },
-          chart: { labels: ["1", "5", "10", "15", "20", "25", "31"], expense: [12, 108, 54, 230, 172, 322, 286] },
-        },
-        year: {
-          label: "今年支出",
-          expense: 16782.4,
-          amounts: { food: 4288.2, shopping: 2495.5, fun: 1860, medical: 986, social: 2280, transport: 1382.7, fixed: 2500, travel: 1000 },
-          chart: { labels: ["1月", "3月", "5月", "7月", "9月", "10月"], expense: [1200, 1780, 1560, 2480, 1980, 1876] },
-        },
-      };
-
-      /* 全部模式：跨年累计，图表以年为单位（2019–2026，8 根演示 >6 滚动）；明细=近30天流水 */
-      const ALL_DATA = {
-        label: "全部支出",
-        expense: 112685.9,
-        amounts: { food: 32680.4, shopping: 21450.8, fun: 12680.2, medical: 6540.6, social: 14320.5, transport: 9872.4, fixed: 12400, travel: 2741 },
-        chart: { labels: ["2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026"], expense: [12430.5, 11860.2, 13240.8, 14520.3, 13980.6, 15640.2, 14230.9, 16782.4] },
-      };
+      /* v3.0：演示基线（PERIODS/ALL_DATA/随机历史页）已全部删除，
+         expense、amounts、chart、entries 一律从 state.records 按周期派生 */
 
       const PERIOD_ORDER = ["week", "month", "year", "all"];
       const CHEVRON = '<svg class="icon category-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>';
 
       const state = {
+        records: [], // 云库 records 集合全部记录（按 createdAt 降序）
         period: "month",
         page: { week: 0, month: 0, year: 0, all: 0 }, // 0=本期，1=上一期，…（各 tab 独立记页；全部不翻页）
         selectedCategoryId: "food",
         selectedSub: "", // 子分类 chips 选中项
         subByCat: {}, // 各分类各自记住子分类选择，切走再切回不丢（与出游文本保留同口径）
         travelText: "", // 出游的补充文本（独立保存，防重渲染丢字）
+        payer: "我", // 记账人（我 / TA）
+        saving: false, // 云库写入中，防重复提交
         recordDate: "", // 弹层当前记账日期（YYYY-MM-DD）
         calMonth: "", // 日历弹层展示的月份（YYYY-MM）
         subOpen: false, // 子 chips 行展开态
         selectedIcon: "food",
         editingCategoryId: null,
-        editingEntryId: null, // 非空=编辑明细中的某笔
+        editingEntryId: null, // 非空=编辑明细中的某笔（云库 _id）
         activeSheet: null,
         chartMode: "bars", // 柱状/曲线互斥切换
       };
@@ -535,39 +566,37 @@
         const sameYear = year === now.getFullYear();
         return `${sameYear ? "" : `${year} 年 `}${month} 月 ${day} 日`;
       }
-      /* 演示数据只有「今天 / 昨天 / 10 月 9 日」这类中文串，播种时按当年解析，落在未来的按去年处理 */
-      function dateFromMeta(meta) {
-        const head = meta.split(" · ")[0];
-        if (/^(今天|刚刚)$/.test(head)) return todayISO();
-        if (head === "昨天") return isoOf(new Date(Date.now() - 86400000));
-        const hit = head.match(/(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-        if (!hit) return todayISO();
-        const now = new Date();
-        const year = hit[1] ? Number(hit[1]) : now.getFullYear();
-        let date = new Date(year, Number(hit[2]) - 1, Number(hit[3]));
-        if (!hit[1] && date > now) date = new Date(year - 1, Number(hit[2]) - 1, Number(hit[3]));
-        return isoOf(date);
+      /* ── CloudBase 云库数据层（records 集合） ── */
+      const ENV_ID = "moneycoming-d7gm9tzbwd423d91c";
+      const CLOUD = { app: null, auth: null, db: null };
+      function initCloud() {
+        if (typeof window.cloudbase === "undefined") return false;
+        try {
+          CLOUD.app = window.cloudbase.init({ env: ENV_ID });
+          CLOUD.auth = CLOUD.app.auth();
+          CLOUD.db = CLOUD.app.database();
+          return true;
+        } catch (error) {
+          return false;
+        }
       }
-
-      /* 演示流水种子：meta 只用于播种推算日期，之后 date 是记录的一等字段 */
-      const SEED = [
-        { icon: "food", cat: "food", sub: "三餐", title: "咖啡与早餐", meta: "今天 · 餐饮 · 三餐", amount: 36 },
-        { icon: "transport", cat: "transport", sub: "", title: "地铁出行", meta: "今天 · 交通", amount: 6 },
-        { icon: "food", cat: "food", sub: "水", title: "矿泉水", meta: "昨天 · 餐饮 · 水", amount: 3 },
-        { icon: "fixed", cat: "fixed", sub: "", title: "会员订阅", meta: "10 月 8 日 · 固支", amount: 25 },
-        { icon: "transport", cat: "transport", sub: "", title: "地铁出行", meta: "10 月 9 日 · 交通", amount: 6 },
-        { icon: "shopping", cat: "shopping", sub: "生活用品", title: "每周采购", meta: "10 月 8 日 · 购物 · 生活用品", amount: 128.5 },
-        { icon: "shopping", cat: "shopping", sub: "服装", title: "秋装", meta: "10 月 3 日 · 购物 · 服装", amount: 320 },
-        { icon: "fixed", cat: "fixed", sub: "", title: "房租", meta: "10 月 1 日 · 固支", amount: 2300 },
-        { icon: "transport", cat: "transport", sub: "", title: "地铁出行", meta: "9 月 28 日 · 交通", amount: 6 },
-        { icon: "food", cat: "food", sub: "烟酒", title: "朋友聚会酒水", meta: "9 月 26 日 · 餐饮 · 烟酒", amount: 186 },
-        { icon: "social", cat: "social", sub: "", title: "同事随礼", meta: "9 月 22 日 · 社交", amount: 200 },
-        { icon: "fun", cat: "fun", sub: "", title: "电影票", meta: "9 月 28 日 · 娱乐", amount: 88 },
-        { icon: "medical", cat: "medical", sub: "", title: "感冒药", meta: "9 月 20 日 · 医疗", amount: 46 },
-      ];
-      let recordSeq = 0;
-      const RECORDS = SEED.map((item) => ({ ...item, id: `demo-${++recordSeq}`, date: dateFromMeta(item.meta), demo: true, seq: recordSeq }));
-      const findRecord = (id) => RECORDS.find((record) => record.id === id);
+      const recordsCol = () => CLOUD.db.collection("records");
+      const sortRecords = () => state.records.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      const findRecord = (id) => state.records.find((record) => record._id === id);
+      let lastSyncAt = 0; // 最近一次成功拉取时间（visibilitychange 重拉节流 10 秒）
+      /* 启动 / 登录后 / 窗口重新可见（节流 10 秒）时重拉；失败保留上次数据 */
+      async function loadRecords() {
+        try {
+          const res = await recordsCol().where({}).limit(1000).get();
+          const rows = (res && res.result && res.result.data) || (res && res.data) || [];
+          state.records = rows.slice();
+          sortRecords();
+          lastSyncAt = Date.now();
+          render();
+        } catch (error) {
+          showToast("同步失败，请检查网络后重试");
+        }
+      }
 
       /* 周期区间：记录归属的唯一依据。年/全部的明细口径沿用 v2.0 拍板的「近30天」 */
       function periodRange(period, page) {
@@ -595,17 +624,10 @@
         return periodRange(period, page);
       }
       const inRange = (iso, [start, end]) => iso >= start && iso <= end;
+      /* 明细：区间内记录按 createdAt 降序（最新在上） */
       function entriesFor(period, page) {
         const range = entriesRange(period, page);
-        return RECORDS.filter((record) => inRange(record.date, range)).sort((a, b) => (a.date === b.date ? b.seq - a.seq : (a.date < b.date ? 1 : -1)));
-      }
-      /* 聚合数 = 演示基线 + 用户记的笔（按区间归属）；演示种子不计入，保持拍板过的展示数字 */
-      function userDelta(period, page) {
-        const range = periodRange(period, page);
-        const rows = RECORDS.filter((record) => !record.demo && inRange(record.date, range));
-        const amounts = {};
-        rows.forEach((record) => { amounts[record.cat] = round2((amounts[record.cat] ?? 0) + record.amount); });
-        return { expense: round2(rows.reduce((sum, record) => sum + record.amount, 0)), amounts };
+        return state.records.filter((record) => inRange(record.date, range));
       }
       /* 保存后跳到能看见这笔的视图：当前视图已含则不动，否则就近落到包含该日期的周/月页 */
       function viewForDate(iso) {
@@ -616,39 +638,56 @@
         return { period: "month", page: monthsBack };
       }
 
-      /* 历史周期随机基线：确定性生成（同一页永远同一数据），仅演示排版；用户记录不缓存、实时合并 */
-      const historyCache = new Map();
-      function hashSeed(text) {
-        let h = 2166136261;
-        for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
-        return h >>> 0;
-      }
-      function mulberry32(seed) {
-        return () => {
-          seed = (seed + 0x6d2b79f5) | 0;
-          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      /* 图表序列：全部从 state.records 按周期派生
+         week=自然周一~周日 7 根（一~日）；month=每天一根（labels 只标 1/5/10/15/20/25/末日）；
+         year=12 根（1月~12月）；all=按年聚合（labels 裸年份，>6 根走 scrollMode） */
+      function chartData(period, page) {
+        const now = new Date();
+        const inPeriod = state.records.filter((record) => inRange(record.date, periodRange(period, page)));
+        const sumOf = (rows) => round2(rows.reduce((total, record) => total + record.amount, 0));
+        if (period === "week") {
+          const [start] = periodRange(period, page);
+          const [sy, sm, sd] = start.split("-").map(Number);
+          const monday = new Date(sy, sm - 1, sd);
+          const labels = ["一", "二", "三", "四", "五", "六", "日"];
+          const expense = labels.map((_, index) => {
+            const iso = isoOf(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index));
+            return sumOf(inPeriod.filter((record) => record.date === iso));
+          });
+          return { labels, expense };
+        }
+        if (period === "month") {
+          const first = new Date(now.getFullYear(), now.getMonth() - page, 1);
+          const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+          const marked = [1, 5, 10, 15, 20, 25, days];
+          const labels = [];
+          const expense = [];
+          for (let day = 1; day <= days; day += 1) {
+            const iso = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            labels.push(marked.includes(day) ? String(day) : "");
+            expense.push(sumOf(inPeriod.filter((record) => record.date === iso)));
+          }
+          return { labels, expense };
+        }
+        if (period === "year") {
+          const year = now.getFullYear() - page;
+          const labels = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+          const expense = labels.map((_, index) => {
+            const month = String(index + 1).padStart(2, "0");
+            return sumOf(inPeriod.filter((record) => record.date.startsWith(`${year}-${month}`)));
+          });
+          return { labels, expense };
+        }
+        const years = [...new Set(state.records.map((record) => Number(String(record.date).slice(0, 4))).filter(Boolean))];
+        const list = [];
+        if (years.length) for (let year = Math.min(...years); year <= Math.max(...years); year += 1) list.push(year);
+        else list.push(now.getFullYear());
+        return {
+          labels: list.map((year) => String(year)),
+          expense: list.map((year) => sumOf(inPeriod.filter((record) => record.date.startsWith(String(year))))),
         };
       }
-      function historyBase(period, page) {
-        const key = `${period}-${page}`;
-        if (historyCache.has(key)) return historyCache.get(key);
-        const base = PERIODS[period];
-        const rand = mulberry32(hashSeed(key));
-        const scale = 0.62 + rand() * 0.76;
-        const data = {
-          label: base.label,
-          expense: round2(base.expense * scale),
-          amounts: Object.fromEntries(Object.entries(base.amounts).map(([id, value]) => [id, round2(value * (0.7 + rand() * 0.6))])),
-          chart: {
-            labels: base.chart.labels,
-            expense: base.chart.expense.map((value) => round2(value * (0.5 + rand() * 1.05))),
-          },
-        };
-        historyCache.set(key, data);
-        return data;
-      }
+
       function periodLabel(period, page) {
         if (period === "week") {
           if (page === 0) return "本周";
@@ -686,16 +725,17 @@
       const sheets = $$(".bottom-sheet");
       let toastTimer;
 
-      /* 视图数据 = 演示基线（当前页或历史随机页）+ 用户记录按日期区间的增量；明细直接取区间内记录 */
+      /* 视图数据 = state.records 按周期派生（汇总/分类/图表用 periodRange，明细用 entriesRange） */
       function currentData() {
         const period = state.period;
         const page = state.page[period];
-        const base = period === "all" ? ALL_DATA : (page === 0 ? PERIODS[period] : historyBase(period, page));
-        const delta = userDelta(period, page);
+        const rows = state.records.filter((record) => inRange(record.date, periodRange(period, page)));
+        const amounts = {};
+        rows.forEach((record) => { amounts[record.category] = round2((amounts[record.category] ?? 0) + record.amount); });
         return {
-          ...base,
-          expense: round2(base.expense + delta.expense),
-          amounts: Object.fromEntries(Object.entries(base.amounts).map(([id, value]) => [id, round2(value + (delta.amounts[id] ?? 0))])),
+          expense: round2(rows.reduce((sum, record) => sum + record.amount, 0)),
+          amounts,
+          chart: chartData(period, page),
           entries: entriesFor(period, page),
         };
       }
@@ -769,6 +809,15 @@
         }
       }
 
+      /* 记账人胶囊：我 / TA 玻璃胶囊互斥选中 */
+      function renderPayerChips() {
+        $$("#payer-chips button").forEach((button) => {
+          const on = button.dataset.payer === state.payer;
+          button.classList.toggle("is-selected", on);
+          button.setAttribute("aria-pressed", String(on));
+        });
+      }
+
       function renderCategories(amounts) {
         const rows = categoryRows(amounts);
         const max = Math.max(...rows.map((item) => item.amount), 1);
@@ -808,9 +857,10 @@
         const grid = [24, 71, 118].map((y) => `<line class="chart-grid" x1="16" x2="${width - 16}" y1="${y}" y2="${y}" />`).join("");
 
         const bars = state.chartMode === "bars" ? data.expense.map((value, index) => {
-          const x = center(index) - 4;
+          const barW = Math.min(8, step * 0.6); // 月视图柱多：柱宽随步距自适应
+          const x = center(index) - barW / 2;
           const y = yOf(value);
-          return `<rect class="${value ? "chart-expense-bar" : "chart-zero"}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="8" height="${(baseline - y).toFixed(1)}" rx="2" />`;
+          return `<rect class="${value ? "chart-expense-bar" : "chart-zero"}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(baseline - y).toFixed(1)}" rx="2" />`;
         }).join("") : "";
 
         const points = data.expense.map((value, index) => [center(index), yOf(value)]);
@@ -826,11 +876,16 @@
           ? `<path class="chart-line-area" d="${area}" style="fill:var(--line-stroke)" />${data.expense.map((value, index) => (value ? `<circle class="chart-line-dot" cx="${center(index).toFixed(1)}" cy="${yOf(value).toFixed(1)}" r="2.5" />` : "")).join("")}<path class="chart-line" d="${path}" />`
           : "";
 
-        const labels = data.labels.map((label, index) => `<text class="chart-axis-label" x="${center(index).toFixed(1)}" y="147" text-anchor="middle">${escapeHtml(label)}</text>`).join("");
-        /* 数值标注：柱状压柱顶上方 6px，曲线压点上方 8px */
+        const labels = data.labels.map((label, index) => (label ? `<text class="chart-axis-label" x="${center(index).toFixed(1)}" y="147" text-anchor="middle">${escapeHtml(label)}</text>` : "")).join("");
+        /* 数值标注：柱状压柱顶上方 6px，曲线压点上方 8px；点数 ≤12 全点标数值，>12 只标最大值点（防重叠） */
         const chartNum = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
         const valueOffset = state.chartMode === "bars" ? 6 : 8;
-        const values = data.expense.map((value, index) => `<text class="chart-value-label" x="${center(index).toFixed(1)}" y="${(yOf(value) - valueOffset).toFixed(1)}" text-anchor="middle">${chartNum.format(value)}</text>`).join("");
+        const showEvery = data.expense.length <= 12;
+        const maxIndex = data.expense.indexOf(Math.max(...data.expense));
+        const values = data.expense.map((value, index) => {
+          if (!showEvery && index !== maxIndex) return "";
+          return `<text class="chart-value-label" x="${center(index).toFixed(1)}" y="${(yOf(value) - valueOffset).toFixed(1)}" text-anchor="middle">${chartNum.format(value)}</text>`;
+        }).join("");
         chart.innerHTML = `<title id="chart-description">当期支出趋势，柱状与曲线为同一支出序列</title><defs><linearGradient id="bar-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--bar-top)" /><stop offset="1" style="stop-color:var(--bar-bottom)" /></linearGradient></defs>${grid}${bars}${line}${values}${labels}`;
         const scrollBox = $("#chart-scroll");
         const stickRight = () => { scrollBox.scrollLeft = scrollBox.scrollWidth; };
@@ -838,27 +893,24 @@
         requestAnimationFrame(stickRight); // 布局落定后补一发，防首帧不生效
       }
 
-      /* 明细副标题＝分类路径；日期由组头承担不再重复，标题已是分类名时也不再重复 */
+      /* 明细 meta：{记账人} · {今天|昨天|M 月 D 日} · {分类名}[ · {子分类}] */
       function entryMeta(record) {
-        const category = catById(record.cat);
-        if (record.title === category.name) return record.sub || "";
-        return [category.name, record.sub].filter(Boolean).join(" · ");
+        const category = catById(record.category);
+        return [record.payer || "我", dateLabel(record.date), category.name, record.sub || ""].filter(Boolean).join(" · ");
       }
 
       function renderEntries(entries) {
         if (!entries.length) {
-          entryList.innerHTML = '<li class="list-empty">这一段还没有记录</li>';
+          entryList.innerHTML = '<li class="list-empty">本期还没有记账</li>';
           return;
         }
-        let head = "";
         entryList.innerHTML = entries.map((entry) => {
-          const label = dateLabel(entry.date);
-          const group = label === head ? "" : `<li class="group-head" aria-hidden="true">${escapeHtml(label)}</li>`;
-          head = label;
-          return `${group}
-          <li class="row entry-row" data-entry-id="${escapeHtml(entry.id)}" role="button" tabindex="0" aria-label="编辑${escapeHtml(entry.title)}">
-            <span class="row-icon" aria-hidden="true">${icon(entry.icon)}</span>
-            <span class="entry-main"><span class="entry-title">${escapeHtml(entry.title)}</span><span class="entry-meta">${escapeHtml(entryMeta(entry))}</span></span>
+          const category = catById(entry.category);
+          const title = entry.title || category.name;
+          return `
+          <li class="row entry-row" data-entry-id="${escapeHtml(entry._id)}" role="button" tabindex="0" aria-label="编辑${escapeHtml(title)}">
+            <span class="row-icon" aria-hidden="true">${icon(category.icon)}</span>
+            <span class="entry-main"><span class="entry-title">${escapeHtml(title)}</span><span class="entry-meta">${escapeHtml(entryMeta(entry))}</span></span>
             <strong class="entry-amount">${plain(entry.amount)}</strong>
           </li>`;
         }).join("");
@@ -926,7 +978,7 @@
         const category = catById(state.selectedCategoryId);
         const note = $("#note-input").value.trim() || category.name;
         const sub = category.children === "free" ? ($("#sub-travel-input")?.value.trim() || state.travelText.trim() || "") : (state.selectedSub || "");
-        return { amount: round2(Number(raw)), category, note, sub, iso, when: dateLabel(iso) };
+        return { amount: round2(Number(raw)), category, note, sub, iso, payer: state.payer || "我" };
       }
 
       /* 日期弹层：自绘月历，过去与未来日期均可选；选完回到记一笔表单。 */
@@ -976,20 +1028,35 @@
         $("#save-record").classList.toggle("is-muted", !(/^\d{1,7}(\.\d{1,2})?$/.test(raw) && Number(raw) > 0));
       }
 
-      function saveRecord() {
+      /* 新增 / 编辑一律先写云库，成功后才改本地 state.records 并 render */
+      async function saveRecord() {
         const form = readRecordForm();
         if (!form) return;
-        const { amount, category, note, sub, iso } = form;
+        if (state.saving) return;
+        const { amount, category, note, sub, iso, payer } = form;
         const wasEdit = state.editingEntryId != null;
-        if (wasEdit) {
-          /* 编辑：单一存储里改这一条，所有含该日期的视图自动同步 */
-          const record = findRecord(state.editingEntryId);
-          if (record) Object.assign(record, { amount, cat: category.id, icon: category.icon, sub, title: note, date: iso });
-          state.editingEntryId = null;
-        } else {
-          recordSeq += 1;
-          RECORDS.push({ id: `u${recordSeq}`, date: iso, cat: category.id, icon: category.icon, sub, title: note, amount, demo: false, seq: recordSeq });
+        state.saving = true;
+        try {
+          if (wasEdit) {
+            const patch = { amount, category: category.id, sub, title: note, date: iso, payer, updatedAt: Date.now() };
+            await recordsCol().doc(state.editingEntryId).update(patch);
+            const hit = findRecord(state.editingEntryId);
+            if (hit) Object.assign(hit, patch);
+            state.editingEntryId = null;
+          } else {
+            const now = Date.now();
+            const doc = { amount, category: category.id, sub, title: note, date: iso, payer, createdAt: now, updatedAt: now };
+            const res = await recordsCol().add(doc);
+            const id = (res && (res.id || (res.result && res.result.id))) || "";
+            state.records.unshift({ ...doc, _id: id });
+            sortRecords();
+          }
+        } catch (error) {
+          state.saving = false;
+          showToast("保存失败，请重试");
+          return;
         }
+        state.saving = false;
         /* 当前视图看不见这笔时才跳视图，跳到包含该日期的周/月/年/全部 */
         if (!inRange(iso, entriesRange(state.period, state.page[state.period]))) {
           const view = viewForDate(iso);
@@ -1011,6 +1078,7 @@
         state.travelText = "";
         state.subByCat = {};
         state.subOpen = true;
+        state.payer = "我";
         $("#sheet-title").textContent = "记一笔";
         $("#save-record").textContent = "完成";
         $("#amount-input").value = "";
@@ -1022,6 +1090,7 @@
         del.classList.remove("is-armed");
         del.textContent = "删除这笔";
         renderCategoryChips();
+        renderPayerChips();
         syncSaveState();
         openSheet("#record-sheet", "#amount-input");
       }
@@ -1032,8 +1101,8 @@
         state.editingEntryId = entryId;
         $("#sub-row").innerHTML = "";
         $("#sub-row").hidden = true;
-        state.selectedCategoryId = hit.cat;
-        const category = catById(hit.cat);
+        state.selectedCategoryId = hit.category;
+        const category = catById(hit.category);
         if (category.children === "free") {
           state.travelText = hit.sub || "";
           state.selectedSub = "";
@@ -1043,17 +1112,19 @@
           state.travelText = "";
           state.subOpen = Array.isArray(category.children) && category.children.length > 0;
         }
+        state.payer = hit.payer || "我";
         $("#sheet-title").textContent = "编辑账目";
         $("#save-record").textContent = "保存";
-        $("#amount-input").value = hit.amount.toFixed(2);
+        $("#amount-input").value = Number(hit.amount).toFixed(2);
         state.recordDate = hit.date;
         syncDateField();
-        $("#note-input").value = hit.title;
+        $("#note-input").value = hit.title || category.name;
         const del = $("#delete-record");
         del.hidden = false;
         del.classList.remove("is-armed");
         del.textContent = "删除这笔";
         renderCategoryChips();
+        renderPayerChips();
         syncSaveState();
         openSheet("#record-sheet", "#amount-input");
       }
@@ -1155,8 +1226,16 @@
         if (row) openEntryEditor(row.dataset.entryId);
       });
 
-      /* 删除账目：两击确认防误触（第一次武装，第二次执行并跨周期同步） */
-      $("#delete-record").addEventListener("click", () => {
+      /* 记账人：我 / TA 胶囊互斥 */
+      $("#payer-chips").addEventListener("click", (event) => {
+        const chip = event.target.closest("[data-payer]");
+        if (!chip) return;
+        state.payer = chip.dataset.payer;
+        renderPayerChips();
+      });
+
+      /* 删除账目：两击确认防误触（第一次武装，第二次删云库，成功后改本地并跨周期同步） */
+      $("#delete-record").addEventListener("click", async () => {
         const btn = $("#delete-record");
         const id = state.editingEntryId;
         if (id == null) return;
@@ -1165,8 +1244,17 @@
           btn.textContent = "确认删除这笔？再点一次";
           return;
         }
-        const index = RECORDS.findIndex((record) => record.id === id);
-        if (index > -1) RECORDS.splice(index, 1);
+        if (state.saving) return;
+        state.saving = true;
+        try {
+          await recordsCol().doc(id).remove();
+        } catch (error) {
+          state.saving = false;
+          showToast("删除失败，请重试");
+          return;
+        }
+        state.saving = false;
+        state.records = state.records.filter((record) => record._id !== id);
         state.editingEntryId = null;
         render();
         closeSheet();
@@ -1206,6 +1294,74 @@
       moveThumb($("#period-switch"), PERIOD_ORDER, state.period);
       syncNav();
       render();
+
+      /* ── 登录（CloudBase 用户名密码）：已登录直接进 App 拉数据，否则显示登录页 ── */
+      function showLogin(errorText = "") {
+        $("#login-error").textContent = errorText;
+        $("#login-screen").hidden = false;
+      }
+      const hideLogin = () => { $("#login-screen").hidden = true; };
+      let loggingIn = false;
+
+      $("#login-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (loggingIn) return;
+        const username = $("#login-username").value.trim();
+        const password = $("#login-password").value;
+        if (!username || !password) {
+          $("#login-error").textContent = "请输入用户名和密码";
+          return;
+        }
+        loggingIn = true;
+        const btn = $("#login-submit");
+        btn.disabled = true;
+        btn.textContent = "登录中…";
+        try {
+          await CLOUD.auth.signInWithUsernameAndPassword(username, password);
+          hideLogin();
+          $("#login-error").textContent = "";
+          await loadRecords();
+        } catch (error) {
+          $("#login-error").textContent = "登录失败，请检查用户名密码（并确认控制台已开启『用户名密码』登录方式）";
+        } finally {
+          loggingIn = false;
+          btn.disabled = false;
+          btn.textContent = "登录";
+        }
+      });
+
+      $("#logout-btn").addEventListener("click", async () => {
+        try { await CLOUD.auth.signOut(); } catch (error) { /* 退出失败也退回登录页 */ }
+        state.records = [];
+        state.editingEntryId = null;
+        render();
+        showLogin();
+      });
+
+      /* 窗口重新可见时重拉云端数据（节流 10 秒） */
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState !== "visible") return;
+        if (!CLOUD.db) return;
+        if (Date.now() - lastSyncAt < 10000) return;
+        loadRecords();
+      });
+
+      async function boot() {
+        if (!initCloud()) {
+          $("#login-submit").disabled = true;
+          showLogin("云服务组件加载失败，请检查网络后刷新页面");
+          return;
+        }
+        let loginState = null;
+        try { loginState = await Promise.resolve(CLOUD.auth.hasLoginState()); } catch (error) { loginState = null; }
+        if (loginState) {
+          hideLogin();
+          loadRecords();
+        } else {
+          showLogin();
+        }
+      }
+      boot();
     </script>
   </body>
 </html>
